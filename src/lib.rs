@@ -51,7 +51,7 @@ pub mod sci_mode {
 const VS1053_CHUNK_SIZE: u8 = 32;
 const END_FILL_BYTE: u16 = 0x1e06;
 
-// TODO i2s?
+// TODO i2s see original driver?
 const _ADDR_REG_GPIO_VAL_R: u16 = 0xc018;
 const _ADDR_REG_I2S_CONFIG_RW: u16 = 0xc040;
 
@@ -61,6 +61,7 @@ const ADDR_REG_GPIO_ODATA_RW: u16 = 0xc019;
 pub const VOLUME_MAX: u16 = 0;
 pub const VOLUME_MIN: u16 = 0xfefe;
 pub const VOLUME_OFF: u16 = 0xffff;
+const END_FILL_BYTE_BUF_LEN: u16 = 2052;
 
 fn map_volume(x: u8, in_min: i16, in_max: i16, out_min: i16, out_max: i16) -> u8 {
     ((x as i16 - in_min) * (out_max - out_min + 1) / (in_max - in_min + 1) + out_min) as u8
@@ -106,6 +107,7 @@ where
     }
 
     fn await_data_request(&mut self) {
+        // TODO - brain dead stupid busy wait
         while self.req.is_low().unwrap() {
             self.delay.delay_us(100);
         }
@@ -215,7 +217,7 @@ where
 
         self.delay.delay_ms(500);
 
-        if let Ok(_) = self.test_comm(true) {
+        if self.test_comm(true).is_ok() {
             self.write_register(regs::SCI_VOL, 0)?;
             self.write_register(regs::SCI_AUDATA, 44101)?;
             self.write_register(regs::SCI_CLOCKF, 6 << 12)?; // Normal clock settings multiplyer 3.0 = 12.2 MHz
@@ -244,22 +246,6 @@ where
             self.await_data_request();
 
             self.spi.write(chunk).map_err(SpiError::Spi)?;
-            self.spi.flush().map_err(SpiError::Spi)?;
-        }
-
-        self.data_mode_off()?;
-
-        Ok(())
-    }
-
-    pub fn write_end_bytes(&mut self, len: u16) -> Result<(), Self::Error> {
-        self.data_mode_on()?;
-
-        for _ in [0..len].chunks(VS1053_CHUNK_SIZE as usize) {
-            self.await_data_request();
-            self.spi
-                .write(&[self.end_fill_byte])
-                .map_err(SpiError::Spi)?;
             self.spi.flush().map_err(SpiError::Spi)?;
         }
 
@@ -312,25 +298,29 @@ where
         )
     }
 
-    pub fn stop_play(&mut self) -> Result<(), Self::Error> {
-        self.write_end_bytes(2052)?;
-        self.delay.delay_ms(10);
+    pub fn stop_play(&mut self) -> Result<bool, Self::Error> {
+        // see section10.5.2 of VLSI datasheet - canceling playback
+        let end_fill_byte_buf = [self.end_fill_byte; END_FILL_BYTE_BUF_LEN as usize];
+
         self.write_cancel()?;
 
-        // TODO
-        for _ in 0..200 {
-            self.write_end_bytes(32)?;
+        // manual says If SM_CANCEL doesn’t clear after 2048 bytes
+        for _ in 0..64 {
+            // send silence of 32b
+            let buf = [self.end_fill_byte; VS1053_CHUNK_SIZE as usize];
+            self.write(&buf)?;
 
-            if let Ok(res) = self.read_cancel() {
-                if res == 0 {
-                    self.write_end_bytes(2052)?;
-                    return Ok(());
+            if let Ok(cancel_value) = self.read_cancel() {
+                if cancel_value == 0 {
+                    self.write(&end_fill_byte_buf)?;
+                    return Ok(true);
                 }
             }
             self.delay.delay_ms(10);
         }
-        // TODO error handling
-        Ok(())
+        // manual says to do a software reset but I did not see a problem so far
+        // after software reset we might need to load patches again too
+        Ok(false)
     }
 
     pub fn get_chip_connected(&mut self) -> Result<bool, Self::Error> {
@@ -370,6 +360,7 @@ where
         Ok(())
     }
 
+    // TODO really needed API?
     pub fn set_stream_mode_on(&mut self) -> Result<(), Self::Error> {
         self.write_register(
             regs::SCI_MODE,
@@ -380,6 +371,7 @@ where
         Ok(())
     }
 
+    // TODO really needed API?
     pub fn set_stream_mode_off(&mut self) -> Result<(), Self::Error> {
         self.write_register(regs::SCI_MODE, 1 << sci_mode::SM_SDINEW)?;
         self.delay.delay_ms(10);
