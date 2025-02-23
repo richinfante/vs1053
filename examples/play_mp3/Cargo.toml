@@ -1,0 +1,25 @@
+[package]
+name = "play_mp3"
+authors = ["Max Weninger <max.weninger@gmail.com>"]
+version = "0.0.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[dependencies]
+esp-hal = { version = "0.23.1", features = ["esp32s3"] }
+esp-println = { version = "0.13.0", features = ["esp32s3", "log"] }
+esp-backtrace = { version = "0.15.0", features = ["esp32s3", "panic-handler", "exception-handler", "colors", "println"] }
+vs1053 = { path = "../.."}
+
+[profile.dev]
+opt-level = 3
+
+[profile.release]
+codegen-units    = 1
+debug            = 2
+debug-assertions = true
+incremental      = false
+opt-level        = 3
+lto = 'fat'
+overflow-checks  = false

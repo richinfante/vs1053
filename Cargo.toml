@@ -1,0 +1,17 @@
+[package]
+name = "vs1053"
+authors = ["Max Weninger <max.weninger@gmail.com>"]
+version = "0.1.0"
+edition = "2021"
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+categories = ["embedded", "hardware-support", "no-std"]
+description = " SPI driver for for the generic VS1053 Breakout by VLSI Solution  "
+rust-version = "1.81"
+keywords = ["embedded-hal", "vs1053", "SPI"]
+# TODO
+#repository = "https://github.com/Fundevoge/mcp23s17/"
+
+[dependencies]
+embedded-hal = "1.0.0"
+
