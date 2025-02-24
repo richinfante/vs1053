@@ -68,10 +68,12 @@ fn map_volume(x: u8, in_min: i16, in_max: i16, out_min: i16, out_max: i16) -> u8
 }
 
 #[derive(Clone, Copy, Debug)]
-pub enum SpiError<BUS, CS, DC> {
+pub enum VS1053Error<BUS, CS, DC> {
     Spi(BUS),
     Cs(CS),
     Dc(DC),
+    InitError,
+    StopError
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -92,7 +94,7 @@ where
     REQ: InputPin,
     DELAY: DelayNs,
 {
-    pub type Error = SpiError<BUS::Error, CS::Error, DC::Error>;
+    pub type Error = VS1053Error<BUS::Error, CS::Error, DC::Error>;
 
     /// Create new interface
     pub fn new(spi: BUS, cs: CS, dc: DC, req: REQ, delay: DELAY) -> Self {
@@ -118,24 +120,24 @@ where
     }
 
     fn control_mode_on(&mut self) -> Result<(), Self::Error> {
-        self.dc.set_high().map_err(SpiError::Dc)?;
-        self.cs.set_low().map_err(SpiError::Cs)?;
+        self.dc.set_high().map_err(VS1053Error::Dc)?;
+        self.cs.set_low().map_err(VS1053Error::Cs)?;
         Ok(())
     }
 
     fn control_mode_off(&mut self) -> Result<(), Self::Error> {
-        self.cs.set_high().map_err(SpiError::Cs)?;
+        self.cs.set_high().map_err(VS1053Error::Cs)?;
         Ok(())
     }
 
     fn data_mode_on(&mut self) -> Result<(), Self::Error> {
-        self.cs.set_high().map_err(SpiError::Cs)?;
-        self.dc.set_low().map_err(SpiError::Dc)?;
+        self.cs.set_high().map_err(VS1053Error::Cs)?;
+        self.dc.set_low().map_err(VS1053Error::Dc)?;
         Ok(())
     }
 
     fn data_mode_off(&mut self) -> Result<(), Self::Error> {
-        self.dc.set_high().map_err(SpiError::Dc)?;
+        self.dc.set_high().map_err(VS1053Error::Dc)?;
         Ok(())
     }
 
@@ -144,8 +146,8 @@ where
         let mut read_bufer: [u8; 2] = [0u8; 2];
 
         self.control_mode_on()?;
-        self.spi.write(&write_buffer).map_err(SpiError::Spi)?;
-        self.spi.read(&mut read_bufer).map_err(SpiError::Spi)?;
+        self.spi.write(&write_buffer).map_err(VS1053Error::Spi)?;
+        self.spi.read(&mut read_bufer).map_err(VS1053Error::Spi)?;
         let value = u16::from_be_bytes(read_bufer);
 
         self.await_data_request();
@@ -158,8 +160,8 @@ where
         let write_buffer = [2, register, buf[0], buf[1]];
 
         self.control_mode_on()?;
-        self.spi.write(&write_buffer).map_err(SpiError::Spi)?;
-        self.spi.flush().map_err(SpiError::Spi)?;
+        self.spi.write(&write_buffer).map_err(VS1053Error::Spi)?;
+        self.spi.flush().map_err(VS1053Error::Spi)?;
         self.await_data_request();
         self.control_mode_off()?;
         Ok(())
@@ -200,20 +202,20 @@ where
         Ok(cnt == 0)
     }
 
-    pub fn init(&mut self) -> Result<bool, Self::Error> {
+    pub fn init(&mut self) -> Result<(), Self::Error> {
         // spi mode should be slow at this point or you will get errors
-        self.dc.set_high().map_err(SpiError::Dc)?;
-        self.cs.set_high().map_err(SpiError::Cs)?;
+        self.dc.set_high().map_err(VS1053Error::Dc)?;
+        self.cs.set_high().map_err(VS1053Error::Cs)?;
 
         self.delay.delay_ms(100);
 
-        self.dc.set_low().map_err(SpiError::Dc)?;
-        self.cs.set_low().map_err(SpiError::Cs)?;
+        self.dc.set_low().map_err(VS1053Error::Dc)?;
+        self.cs.set_low().map_err(VS1053Error::Cs)?;
 
         self.delay.delay_ms(500);
 
-        self.dc.set_high().map_err(SpiError::Dc)?;
-        self.cs.set_high().map_err(SpiError::Cs)?;
+        self.dc.set_high().map_err(VS1053Error::Dc)?;
+        self.cs.set_high().map_err(VS1053Error::Cs)?;
 
         self.delay.delay_ms(500);
 
@@ -233,9 +235,9 @@ where
                 self.end_fill_byte = (value & 0xFF) as u8;
             }
             self.delay.delay_ms(100);
-            Ok(true)
+            Ok(())
         } else {
-            Ok(false)
+            Err(VS1053Error::InitError)
         }
     }
 
@@ -245,8 +247,8 @@ where
         for chunk in buf.chunks(VS1053_CHUNK_SIZE as usize) {
             self.await_data_request();
 
-            self.spi.write(chunk).map_err(SpiError::Spi)?;
-            self.spi.flush().map_err(SpiError::Spi)?;
+            self.spi.write(chunk).map_err(VS1053Error::Spi)?;
+            self.spi.flush().map_err(VS1053Error::Spi)?;
         }
 
         self.data_mode_off()?;
@@ -298,8 +300,9 @@ where
         )
     }
 
-    pub fn stop_play(&mut self) -> Result<bool, Self::Error> {
+    pub fn stop_play(&mut self) -> Result<(), Self::Error> {
         // see section10.5.2 of VLSI datasheet - canceling playback
+        // if space ever becomes and issue dont use a fixed buffer
         let end_fill_byte_buf = [self.end_fill_byte; END_FILL_BYTE_BUF_LEN as usize];
 
         self.write_cancel()?;
@@ -313,14 +316,16 @@ where
             if let Ok(cancel_value) = self.read_cancel() {
                 if cancel_value == 0 {
                     self.write(&end_fill_byte_buf)?;
-                    return Ok(true);
+                    return Ok(());
                 }
             }
             self.delay.delay_ms(10);
         }
         // manual says to do a software reset but I did not see a problem so far
-        // after software reset we might need to load patches again too
-        Ok(false)
+        // leave it to the user to call soft_reset on its own
+        // just to mention that stuff like set_mp3_mode needs to be called
+        // again after a soft reset
+        Err(VS1053Error::StopError)
     }
 
     pub fn get_chip_connected(&mut self) -> Result<bool, Self::Error> {
@@ -360,8 +365,8 @@ where
         Ok(())
     }
 
-    // TODO really needed API?
-    pub fn set_stream_mode_on(&mut self) -> Result<(), Self::Error> {
+    // TODO really needed pub API?
+    fn _set_stream_mode_on(&mut self) -> Result<(), Self::Error> {
         self.write_register(
             regs::SCI_MODE,
             1 << sci_mode::SM_SDINEW | 1 << sci_mode::SM_STREAM,
@@ -371,15 +376,15 @@ where
         Ok(())
     }
 
-    // TODO really needed API?
-    pub fn set_stream_mode_off(&mut self) -> Result<(), Self::Error> {
+    // TODO really needed pub API?
+    fn _set_stream_mode_off(&mut self) -> Result<(), Self::Error> {
         self.write_register(regs::SCI_MODE, 1 << sci_mode::SM_SDINEW)?;
         self.delay.delay_ms(10);
         self.await_data_request();
         Ok(())
     }
 
-    pub fn load_user_code(&mut self, patches: &[u16; 4667]) -> Result<(), Self::Error> {
+    fn load_user_code(&mut self, patches: &[u16; 4667]) -> Result<(), Self::Error> {
         let mut idx = 0;
         while idx < patches.len() {
             let addr = patches[idx].to_be_bytes();
