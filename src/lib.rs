@@ -1,3 +1,12 @@
+//! # VS1053
+//!
+//! ## Overview
+//!
+//! SPI driver for generic VS1053 breakout board
+//!
+//! ## Usage
+//! [See here] (https://gitlab.com/esp322054205/vs1053/-/tree/master/examples/play_mp3)
+//!
 #![no_std]
 #![feature(inherent_associated_types)]
 
@@ -96,7 +105,6 @@ where
 {
     pub type Error = VS1053Error<BUS::Error, CS::Error, DC::Error>;
 
-    /// Create new interface
     pub fn new(spi: BUS, cs: CS, dc: DC, req: REQ, delay: DELAY) -> Self {
         Self {
             spi,
@@ -115,6 +123,7 @@ where
         }
     }
 
+    /// can be used to external check if chip is ready to accept new data
     pub fn data_request(&mut self) -> bool {
         self.req.is_high().unwrap()
     }
@@ -167,41 +176,6 @@ where
         Ok(())
     }
 
-    fn test_comm(&mut self, fast: bool) -> Result<bool, Self::Error> {
-        // Test the communication with the VS1053 module.  The result wille be returned.
-        // If DREQ is low, there is problably no VS1053 connected.  Pull the line HIGH
-        // in order to prevent an endless loop waiting for this signal.  The rest of the
-        // software will still work, but readbacks from VS1053 will fail.
-        let mut cnt = 0;
-        let delta = if fast { 30 } else { 300 }; // 3 for fast SPI
-
-        if !self.req.is_high().unwrap() {
-            return Ok(false);
-        }
-        // Further TESTING.  Check if SCI bus can write and read without errors.
-        // We will use the volume setting for this.
-        // Will give warnings on serial output if DEBUG is active.
-        // A maximum of 20 errors will be reported.
-
-        for mut i in 0..0xFFFF {
-            if cnt > 20 {
-                break;
-            }
-            i += delta;
-
-            self.write_register(regs::SCI_VOL, i)?; // Write data to SCI_VOL
-            let r1 = self.read_register(regs::SCI_VOL)?; // Read back for the first time
-            let r2 = self.read_register(regs::SCI_VOL)?; // Read back a second time
-            if r1 != r2 || i != r1 || i != r2
-            // Check for 2 equal reads
-            {
-                self.delay.delay_ms(10);
-            }
-            cnt += 1;
-        }
-        Ok(cnt == 0)
-    }
-
     pub fn init(&mut self) -> Result<(), Self::Error> {
         // spi mode should be slow at this point or you will get errors
         self.dc.set_high().map_err(VS1053Error::Dc)?;
@@ -219,28 +193,30 @@ where
 
         self.delay.delay_ms(500);
 
-        if self.test_comm(true).is_ok() {
-            self.write_register(regs::SCI_VOL, 0)?;
-            self.write_register(regs::SCI_AUDATA, 44101)?;
-            self.write_register(regs::SCI_CLOCKF, 6 << 12)?; // Normal clock settings multiplyer 3.0 = 12.2 MHz
-            self.write_register(
-                regs::SCI_MODE,
-                1 << sci_mode::SM_SDINEW | 1 << sci_mode::SM_LINE1,
-            )?;
-
-            self.delay.delay_ms(10);
-            self.await_data_request();
-
-            if let Ok(value) = self.wram_read(END_FILL_BYTE) {
-                self.end_fill_byte = (value & 0xFF) as u8;
-            }
-            self.delay.delay_ms(100);
-            Ok(())
-        } else {
-            Err(VS1053Error::InitError)
+        if !self.req.is_high().unwrap() {
+            // most probably not connected correct
+            return Err(VS1053Error::InitError);
         }
+
+        self.write_register(regs::SCI_VOL, 0)?;
+        self.write_register(regs::SCI_AUDATA, 44101)?;
+        self.write_register(regs::SCI_CLOCKF, 6 << 12)?; // Normal clock settings multiplyer 3.0 = 12.2 MHz
+        self.write_register(
+            regs::SCI_MODE,
+            1 << sci_mode::SM_SDINEW | 1 << sci_mode::SM_LINE1,
+        )?;
+
+        self.delay.delay_ms(10);
+        self.await_data_request();
+
+        if let Ok(value) = self.wram_read(END_FILL_BYTE) {
+            self.end_fill_byte = (value & 0xFF) as u8;
+        }
+        self.delay.delay_ms(100);
+        Ok(())
     }
 
+    ///
     pub fn write(&mut self, buf: &[u8]) -> Result<(), Self::Error> {
         self.data_mode_on()?;
 
@@ -264,9 +240,9 @@ where
         self.write_register(regs::SCI_VOL, vol)
     }
 
+    /// Set volume as % value. Both left and right.
+    /// Input value is 0..100.  100 is the loudest.
     pub fn set_volume(&mut self, vol: u8) -> Result<(), Self::Error> {
-        // Set volume.  Both left and right.
-        // Input value is 0..100.  100 is the loudest.
         let value_left = map_volume(vol, 0, 100, 0xFE, 0); // 0..100% to left channel
         let value_right = map_volume(vol, 0, 100, 0xFE, 0); // 0..100% to right channel
 
@@ -293,6 +269,9 @@ where
         })
     }
 
+    // TODO needed pub API?
+    // in theory this is needed if stop_play fails
+    // but set_mp3_mode_on calls it too
     fn soft_reset(&mut self) -> Result<(), Self::Error> {
         self.write_register(
             regs::SCI_MODE,
@@ -300,6 +279,7 @@ where
         )
     }
 
+    /// Stop/cancel playing current
     pub fn stop_play(&mut self) -> Result<(), Self::Error> {
         // see section10.5.2 of VLSI datasheet - canceling playback
         // if space ever becomes and issue dont use a fixed buffer
@@ -328,17 +308,16 @@ where
         Err(VS1053Error::StopError)
     }
 
+    /// Test communication with chip
     pub fn get_chip_connected(&mut self) -> Result<bool, Self::Error> {
         let status = self.read_register(regs::SCI_STATUS)?;
 
         Ok(!(status == 0 || status == 0xFFFF))
     }
 
-    /**
-     * get the Version Number for the VLSI chip
-     * VLSI datasheet: 0 for VS1001, 1 for VS1011, 2 for VS1002, 3 for VS1003, 4 for VS1053 and VS8053,
-     * 5 for VS1033, 7 for VS1103, and 6 for VS1063.
-     */
+    /// Get the Version Number for the VLSI chip
+    /// from VLSI datasheet: 0 for VS1001, 1 for VS1011, 2 for VS1002, 3 for VS1003, 4 for VS1053 and VS8053,
+    /// 5 for VS1033, 7 for VS1103, and 6 for VS1063.
     pub fn get_chip_version(&mut self) -> Result<u16, Self::Error> {
         let status = self.read_register(regs::SCI_STATUS)?;
 
@@ -357,6 +336,8 @@ where
         Ok(value)
     }
 
+    /// Depends on board defaults and can be optional
+    /// Calls soft_reset
     pub fn set_mp3_mode_on(&mut self) -> Result<(), Self::Error> {
         self.wram_write(ADDR_REG_GPIO_DDR_RW, 3)?; // GPIO DDR = 3
         self.wram_write(ADDR_REG_GPIO_ODATA_RW, 0)?; // GPIO ODATA = 0
@@ -365,7 +346,7 @@ where
         Ok(())
     }
 
-    // TODO really needed pub API?
+    // TODO needed pub API?
     fn _set_stream_mode_on(&mut self) -> Result<(), Self::Error> {
         self.write_register(
             regs::SCI_MODE,
@@ -376,7 +357,7 @@ where
         Ok(())
     }
 
-    // TODO really needed pub API?
+    // TODO needed pub API?
     fn _set_stream_mode_off(&mut self) -> Result<(), Self::Error> {
         self.write_register(regs::SCI_MODE, 1 << sci_mode::SM_SDINEW)?;
         self.delay.delay_ms(10);
@@ -411,6 +392,7 @@ where
         Ok(())
     }
 
+    /// Should only be called if chip version is 4
     pub fn load_default_patches(&mut self) -> Result<(), Self::Error> {
         self.load_user_code(&vs1053_patches::PATCHES)
     }

@@ -1,3 +1,5 @@
+/// https://www.vlsi.fi/en/support/software/vs10xxpatches.html
+/// this is only vs1053b-patches.plg
 pub const PATCHES: [u16; 4667] = [
     /* Compressed plugin */
     0x0007, 0x0001, /*copy 1*/
