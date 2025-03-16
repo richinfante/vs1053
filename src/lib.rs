@@ -5,7 +5,7 @@
 //! SPI driver for generic VS1053 breakout board
 //!
 //! ## Usage
-//! [See here] (https://gitlab.com/esp322054205/vs1053/-/tree/master/examples/play_mp3)
+//! [example]: https://gitlab.com/esp322054205/vs1053/-/tree/master/examples/play_mp3
 //!
 #![no_std]
 #![feature(inherent_associated_types)]
@@ -60,16 +60,17 @@ pub mod sci_mode {
 const VS1053_CHUNK_SIZE: u8 = 32;
 const END_FILL_BYTE: u16 = 0x1e06;
 
-// TODO i2s see original driver?
-const _ADDR_REG_GPIO_VAL_R: u16 = 0xc018;
-const _ADDR_REG_I2S_CONFIG_RW: u16 = 0xc040;
-
 const ADDR_REG_GPIO_DDR_RW: u16 = 0xc017;
 const ADDR_REG_GPIO_ODATA_RW: u16 = 0xc019;
 
-pub const VOLUME_MAX: u16 = 0;
-pub const VOLUME_MIN: u16 = 0xfefe;
-pub const VOLUME_OFF: u16 = 0xffff;
+pub const VOLUME_MAX: u8 = 100;
+pub const VOLUME_MIN: u8 = 0;
+
+// for raw API
+pub const RAW_VOLUME_MAX: u16 = 0;
+pub const RAW_VOLUME_MIN: u16 = 0xfefe;
+pub const RAW_VOLUME_OFF: u16 = 0xffff;
+
 const END_FILL_BYTE_BUF_LEN: u16 = 2052;
 
 fn map_volume(x: u8, in_min: i16, in_max: i16, out_min: i16, out_max: i16) -> u8 {
@@ -124,7 +125,7 @@ where
     }
 
     /// can be used to external check if chip is ready to accept new data
-    pub fn data_request(&mut self) -> bool {
+    pub fn get_data_request(&mut self) -> bool {
         self.req.is_high().unwrap()
     }
 
@@ -232,11 +233,14 @@ where
         Ok(())
     }
 
-    fn _get_volume_raw(&mut self) -> Result<u16, Self::Error> {
+    /// direct read of SCI_VOL register
+    pub fn get_volume_raw(&mut self) -> Result<u16, Self::Error> {
         self.read_register(regs::SCI_VOL)
     }
 
-    fn _set_volume_raw(&mut self, vol: u16) -> Result<(), Self::Error> {
+    /// direct write to SCI_VOL register
+    /// can be used to turn audio output off
+    pub fn set_volume_raw(&mut self, vol: u16) -> Result<(), Self::Error> {
         self.write_register(regs::SCI_VOL, vol)
     }
 
@@ -249,7 +253,7 @@ where
         let buf: [u8; 2] = [value_left, value_right];
 
         let value = u16::from_be_bytes(buf);
-        self.write_register(regs::SCI_VOL, value)
+        self.set_volume_raw(value)
     }
 
     fn write_cancel(&mut self) -> Result<(), Self::Error> {
@@ -269,10 +273,9 @@ where
         })
     }
 
-    // TODO needed pub API?
     // in theory this is needed if stop_play fails
     // but set_mp3_mode_on calls it too
-    fn soft_reset(&mut self) -> Result<(), Self::Error> {
+    pub fn soft_reset(&mut self) -> Result<(), Self::Error> {
         self.write_register(
             regs::SCI_MODE,
             1 << sci_mode::SM_SDINEW | 1 << sci_mode::SM_RESET,
@@ -341,25 +344,26 @@ where
     pub fn set_mp3_mode_on(&mut self) -> Result<(), Self::Error> {
         self.wram_write(ADDR_REG_GPIO_DDR_RW, 3)?; // GPIO DDR = 3
         self.wram_write(ADDR_REG_GPIO_ODATA_RW, 0)?; // GPIO ODATA = 0
+        // TODO delay needed
         self.delay.delay_ms(100);
         self.soft_reset()?;
         Ok(())
     }
 
-    // TODO needed pub API?
-    fn _set_stream_mode_on(&mut self) -> Result<(), Self::Error> {
+    pub fn set_stream_mode_on(&mut self) -> Result<(), Self::Error> {
         self.write_register(
             regs::SCI_MODE,
             1 << sci_mode::SM_SDINEW | 1 << sci_mode::SM_STREAM,
         )?;
+        // TODO delay needed
         self.delay.delay_ms(10);
         self.await_data_request();
         Ok(())
     }
 
-    // TODO needed pub API?
-    fn _set_stream_mode_off(&mut self) -> Result<(), Self::Error> {
+    pub fn set_stream_mode_off(&mut self) -> Result<(), Self::Error> {
         self.write_register(regs::SCI_MODE, 1 << sci_mode::SM_SDINEW)?;
+        // TODO delay needed
         self.delay.delay_ms(10);
         self.await_data_request();
         Ok(())
