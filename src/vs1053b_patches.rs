@@ -1,6 +1,7 @@
 /// https://www.vlsi.fi/en/support/software/vs10xxpatches.html
 /// this is only vs1053b-patches.plg
-pub const PATCHES: [u16; 4667] = [
+pub const PATCHES_SIZE: usize = 4667;
+pub const PATCHES: [u16; PATCHES_SIZE] = [
     /* Compressed plugin */
     0x0007, 0x0001, /*copy 1*/
     0x8050, 0x0006, 0x001e, /*copy 30*/

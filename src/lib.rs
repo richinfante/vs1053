@@ -14,7 +14,8 @@ use embedded_hal::delay::DelayNs;
 use embedded_hal::digital::{InputPin, OutputPin};
 use embedded_hal::spi::SpiBus;
 
-mod vs1053_patches;
+mod vs1053b_patches;
+mod vs1053b_patches_flac;
 
 pub mod regs {
     pub const SCI_MODE: u8 = 0x0;
@@ -369,7 +370,7 @@ where
         Ok(())
     }
 
-    fn load_user_code(&mut self, patches: &[u16; 4667]) -> Result<(), Self::Error> {
+    fn load_user_code(&mut self, patches: &[u16]) -> Result<(), Self::Error> {
         let mut idx = 0;
         while idx < patches.len() {
             let addr = patches[idx].to_be_bytes();
@@ -398,6 +399,10 @@ where
 
     /// Should only be called if chip version is 4
     pub fn load_default_patches(&mut self) -> Result<(), Self::Error> {
-        self.load_user_code(&vs1053_patches::PATCHES)
+        self.load_user_code(&vs1053b_patches::PATCHES)
+    }
+
+    pub fn load_flac_patches(&mut self) -> Result<(), Self::Error> {
+        self.load_user_code(&vs1053b_patches_flac::PATCHES_FLAC)
     }
 }

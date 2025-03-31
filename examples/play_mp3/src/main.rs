@@ -45,10 +45,13 @@ fn main()  -> ! {
 
     match vs1053.init() {
         Ok(_) => {
+            // MUST be before loading patches cause
+            // this will call soft_reset which undo patches
+            let _ = vs1053.set_mp3_mode_on();
+
             if vs1053.get_chip_version().unwrap() == 4 {
                 let _ = vs1053.load_default_patches();
             }
-            let _ = vs1053.set_mp3_mode_on();
             let _ = vs1053.set_volume(100);
 
             let delay = Delay::new();
