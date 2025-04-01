@@ -274,8 +274,9 @@ where
         })
     }
 
-    // in theory this is needed if stop_play fails
-    // but set_mp3_mode_on calls it too
+    /// in theory this is needed if stop_play fails
+    /// set_mp3_mode_on calls it too
+    /// patches must be loaded again after a soft reset!
     pub fn soft_reset(&mut self) -> Result<(), Self::Error> {
         self.write_register(
             regs::SCI_MODE,
