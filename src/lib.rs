@@ -16,6 +16,7 @@ use embedded_hal::spi::SpiBus;
 
 mod vs1053b_patches;
 mod vs1053b_patches_flac;
+pub mod codec;
 
 pub mod regs {
     pub const SCI_MODE: u8 = 0x0;
@@ -64,10 +65,11 @@ const END_FILL_BYTE: u16 = 0x1e06;
 const ADDR_REG_GPIO_DDR_RW: u16 = 0xc017;
 const ADDR_REG_GPIO_ODATA_RW: u16 = 0xc019;
 
+/// 0-100% volume API
 pub const VOLUME_MAX: u8 = 100;
 pub const VOLUME_MIN: u8 = 0;
 
-// for raw API
+/// raw volume API
 pub const RAW_VOLUME_MAX: u16 = 0;
 pub const RAW_VOLUME_MIN: u16 = 0xfefe;
 pub const RAW_VOLUME_OFF: u16 = 0xffff;
@@ -84,7 +86,7 @@ pub enum VS1053Error<BUS, CS, DC> {
     Cs(CS),
     Dc(DC),
     InitError,
-    StopError
+    StopError,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -286,7 +288,7 @@ where
 
     /// Stop/cancel playing current
     pub fn stop_play(&mut self) -> Result<(), Self::Error> {
-        // see section10.5.2 of VLSI datasheet - canceling playback
+        // see section 10.5.2 of VLSI datasheet - canceling playback
         // if space ever becomes and issue dont use a fixed buffer
         let end_fill_byte_buf = [self.end_fill_byte; END_FILL_BYTE_BUF_LEN as usize];
 
@@ -346,7 +348,7 @@ where
     pub fn set_mp3_mode_on(&mut self) -> Result<(), Self::Error> {
         self.wram_write(ADDR_REG_GPIO_DDR_RW, 3)?; // GPIO DDR = 3
         self.wram_write(ADDR_REG_GPIO_ODATA_RW, 0)?; // GPIO ODATA = 0
-        // TODO delay needed
+                                                     // TODO delay needed
         self.delay.delay_ms(100);
         self.soft_reset()?;
         Ok(())
@@ -369,6 +371,27 @@ where
         self.delay.delay_ms(10);
         self.await_data_request();
         Ok(())
+    }
+
+    /// see section 9.6.5 of VLSI datasheet
+    pub fn get_decode_time(&mut self) -> Result<u16, Self::Error> {
+        let seconds = self.read_register(regs::SCI_DECODE_TIME)?;
+        Ok(seconds)
+    }
+
+    /// see section 9.6.5 of VLSI datasheet
+    pub fn clear_decode_time(&mut self) -> Result<(), Self::Error> {
+        self.write_register(regs::SCI_DECODE_TIME, 0u16)?;
+        self.write_register(regs::SCI_DECODE_TIME, 0u16)
+    }
+
+    /// see section 9.6.9 of VLSI datasheet
+    /// get current value of SCI_HDAT0 and SCI_HDAT1
+    pub fn get_decode_details(&mut self) -> Result<(u16, u16), Self::Error> {
+        let hdat0 = self.read_register(regs::SCI_HDAT0)?;
+        let hdat1 = self.read_register(regs::SCI_HDAT1)?;
+
+        Ok((hdat0, hdat1))
     }
 
     fn load_user_code(&mut self, patches: &[u16]) -> Result<(), Self::Error> {

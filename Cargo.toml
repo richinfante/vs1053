@@ -13,4 +13,8 @@ repository = "https://gitlab.com/esp322054205/vs1053"
 
 [dependencies]
 embedded-hal = "1.0.0"
+bitfields = {  version = "0.12.4", optional = true }
 
+[features]
+default = ["bitfield_struct"]
+bitfield_struct = ["bitfields"]
