@@ -3,7 +3,13 @@ use bitfields::bitfield;
 /// see section 9.6.9 of VLSI datasheet
 /// contents of SCI_HDAT1 register depending on codec
 ///
-/// let codec = Codec::try_from(hdat1_value).unwrap_or(Codec::UnknownType);
+/// usage: to get codec type currently decoding
+/// will take some time until data is available after starting a stream
+/// ...
+/// if let Ok((hdat0_value, hdat1_value)) = vs1053.get_decode_details() {
+///     let codec = Codec::try_from(hdat1_value).unwrap_or(Codec::UnknownType);
+/// }
+/// ...
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Codec {
     WAVType,
@@ -47,8 +53,20 @@ pub const SCI_HDAT1_FLAC: u16 = 0x664C;
 pub const SCI_HDAT1_MP3_MIN: u16 = 0xFFE0;
 pub const SCI_HDAT1_MP3_MAX: u16 = 0xFFFF;
 
-/// mp3 specific SCI_HDAT0 and SCI_HDAT1
+/// mp3 specific SCI_HDAT0 and SCI_HDAT1 parsing
 /// optional enabled by using bitfield_struct feature
+///
+/// usage:
+///  ...
+///  if let Ok((hdat0_value, hdat1_value)) = vs1053.get_decode_details() {
+///     let codec = Codec::try_from(hdat1_value).unwrap_or(Codec::UnknownType);
+///     if codec == Codec::MP3Type {
+///         let mp3_type = MP3CodecType::from_bits(hdat1_value);
+///         let mp3_data = MP3CodecData::from_bits(hdat0_value);
+///         let bitrate = map_mp3_bitrate(mp3_type.layer(), mp3_type.id(), mp3_data.bit_rate());
+///     }
+///  }
+/// ...
 #[cfg(feature = "bitfield_struct")]
 #[bitfield(u16)]
 #[derive(Copy, Clone)]
