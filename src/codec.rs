@@ -5,11 +5,13 @@ use bitfields::bitfield;
 ///
 /// usage: to get codec type currently decoding
 /// will take some time until data is available after starting a stream
+/// ```
 /// ...
 /// if let Ok((hdat0_value, hdat1_value)) = vs1053.get_decode_details() {
 ///     let codec = Codec::try_from(hdat1_value).unwrap_or(Codec::UnknownType);
 /// }
 /// ...
+/// ```
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Codec {
     WAVType,
@@ -57,6 +59,7 @@ pub const SCI_HDAT1_MP3_MAX: u16 = 0xFFFF;
 /// optional enabled by using bitfield_struct feature
 ///
 /// usage:
+/// ```
 ///  ...
 ///  if let Ok((hdat0_value, hdat1_value)) = vs1053.get_decode_details() {
 ///     let codec = Codec::try_from(hdat1_value).unwrap_or(Codec::UnknownType);
@@ -67,6 +70,7 @@ pub const SCI_HDAT1_MP3_MAX: u16 = 0xFFFF;
 ///     }
 ///  }
 /// ...
+/// ```
 #[cfg(feature = "bitfield_struct")]
 #[bitfield(u16)]
 #[derive(Copy, Clone)]
