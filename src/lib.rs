@@ -64,6 +64,7 @@ const END_FILL_BYTE: u16 = 0x1e06;
 
 const ADDR_REG_GPIO_DDR_RW: u16 = 0xc017;
 const ADDR_REG_GPIO_ODATA_RW: u16 = 0xc019;
+const ADDR_REG_GPIO_I2S_CONFIG_RW: u16 = 0xC040;
 
 /// 0-100% volume API
 pub const VOLUME_MAX: u8 = 100;
@@ -87,6 +88,7 @@ pub enum VS1053Error<BUS, CS, DC> {
     Dc(DC),
     InitError,
     StopError,
+    BadI2sClock,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -245,6 +247,48 @@ where
     /// can be used to turn audio output off
     pub fn set_volume_raw(&mut self, vol: u16) -> Result<(), Self::Error> {
         self.write_register(regs::SCI_VOL, vol)
+    }
+
+    /// Enable or disable I2s, master clock, and set the sample rate, in khz
+    pub fn set_i2s_mode(&mut self, enable: bool, mclk: bool, rate_khz: u8) -> Result<(), Self::Error> {
+        let mode = self.wram_read(ADDR_REG_GPIO_I2S_CONFIG_RW)?;
+
+        // I2S_CONFIG Bits
+        // Name Bits Description
+        // I2S_CF_MCLK_ENA 3 Enables the MCLK output (12.288 MHz)
+        // I2S_CF_ENA 2 Enables I2S, otherwise pins are GPIO
+        // I2S_CF_SRATE 1:0 I2S rate, "10" = 192, "01" = 96, "00" = 48 kHz
+
+        // To enable I2S first write 0xc017 to SCI_WRAMADDR and 0x00f0 to SCI_WRAM, then write 0xc040 to SCI_WRAMADDR and 0x000c to SCI_WRAM
+
+        let mut new_mode = mode & !(0b1111); // clear bits 0-3
+        if enable {
+            new_mode |= 1 << 2; // I2S_CF_ENA
+        }
+        if mclk {
+            new_mode |= 1 << 3; // I2S_CF_MCLK_ENA
+        }
+        match rate_khz {
+            48 => {
+                new_mode |= 0b00; // I2S_CF_SRATE = 00
+            }
+            96 => {
+                new_mode |= 0b01; // I2S_CF_SRATE = 01
+            }
+            192 => {
+                new_mode |= 0b10; // I2S_CF_SRATE = 10
+            }
+            _ => {
+                // invalid rate
+                return Err(VS1053Error::BadI2sClock);
+            }
+        }
+
+        // configure gio
+        self.wram_write(ADDR_REG_GPIO_DDR_RW, 0x00F0)?; // GPIO DDR = 0x00f0
+
+        // set i2s mode
+        self.wram_write(ADDR_REG_GPIO_I2S_CONFIG_RW, new_mode)
     }
 
     /// Set volume as % value. Both left and right.
