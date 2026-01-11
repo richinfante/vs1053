@@ -2,18 +2,21 @@
 name = "vs1053"
 authors = ["Max Weninger <max.weninger@gmail.com>"]
 version = "0.1.5"
-edition = "2021"
+edition = "2024"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
 categories = ["embedded", "hardware-support", "no-std"]
 description = " SPI driver for for the generic VS1053 Breakout by VLSI Solution  "
-rust-version = "1.81"
+
 keywords = ["embedded-hal", "vs1053", "SPI"]
 repository = "https://gitlab.com/esp322054205/vs1053"
 
 [dependencies]
 embedded-hal = "1.0.0"
 bitfields = {  version = "0.12.4", optional = true }
+# display-interface = "0.5.0"
+# display-interface-spi = "0.5.0"
+embassy-sync = { git="https://github.com/embassy-rs/embassy.git", version = "0.7.2", subdir = "embassy-sync"}
 
 [features]
 default = ["bitfield_struct"]

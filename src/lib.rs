@@ -14,6 +14,10 @@ use embedded_hal::delay::DelayNs;
 use embedded_hal::digital::{InputPin, OutputPin};
 use embedded_hal::spi::SpiBus;
 
+use embassy_sync::blocking_mutex::raw::RawMutex;
+use embassy_sync::blocking_mutex::Mutex;
+use core::cell::RefCell;
+
 mod vs1053b_patches;
 mod vs1053b_patches_flac;
 pub mod codec;
@@ -92,8 +96,8 @@ pub enum VS1053Error<BUS, CS, DC> {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct VS1053<BUS, CS, DC, REQ, DELAY> {
-    spi: BUS,
+pub struct VS1053<'a, M, BUS, CS, DC, REQ, DELAY> {
+    spi: &'a Mutex<M, RefCell<BUS>>,
     cs: CS,
     dc: DC,
     req: REQ,
@@ -101,8 +105,9 @@ pub struct VS1053<BUS, CS, DC, REQ, DELAY> {
     end_fill_byte: u8,
 }
 
-impl<BUS, CS, DC, REQ, DELAY> VS1053<BUS, CS, DC, REQ, DELAY>
+impl<'a, M, BUS, CS, DC, REQ, DELAY> VS1053<'a, M, BUS, CS, DC, REQ, DELAY>
 where
+    M: RawMutex,
     BUS: SpiBus,
     CS: OutputPin,
     DC: OutputPin,
@@ -111,7 +116,7 @@ where
 {
     pub type Error = VS1053Error<BUS::Error, CS::Error, DC::Error>;
 
-    pub fn new(spi: BUS, cs: CS, dc: DC, req: REQ, delay: DELAY) -> Self {
+    pub fn new(spi: &'a Mutex<M, RefCell<BUS>>, cs: CS, dc: DC, req: REQ, delay: DELAY) -> Self {
         Self {
             spi,
             cs,
@@ -161,8 +166,8 @@ where
         let mut read_bufer: [u8; 2] = [0u8; 2];
 
         self.control_mode_on()?;
-        self.spi.write(&write_buffer).map_err(VS1053Error::Spi)?;
-        self.spi.read(&mut read_bufer).map_err(VS1053Error::Spi)?;
+        self.spi.lock(|bus| bus.borrow_mut().write(&write_buffer)).map_err(VS1053Error::Spi)?;
+        self.spi.lock(|bus| bus.borrow_mut().read(&mut read_bufer)).map_err(VS1053Error::Spi)?;
         let value = u16::from_be_bytes(read_bufer);
 
         self.await_data_request();
@@ -175,8 +180,8 @@ where
         let write_buffer = [2, register, buf[0], buf[1]];
 
         self.control_mode_on()?;
-        self.spi.write(&write_buffer).map_err(VS1053Error::Spi)?;
-        self.spi.flush().map_err(VS1053Error::Spi)?;
+        self.spi.lock(|bus| bus.borrow_mut().write(&write_buffer)).map_err(VS1053Error::Spi)?;
+        self.spi.lock(|bus| bus.borrow_mut().flush()).map_err(VS1053Error::Spi)?;
         self.await_data_request();
         self.control_mode_off()?;
         Ok(())
@@ -229,8 +234,8 @@ where
         for chunk in buf.chunks(VS1053_CHUNK_SIZE as usize) {
             self.await_data_request();
 
-            self.spi.write(chunk).map_err(VS1053Error::Spi)?;
-            self.spi.flush().map_err(VS1053Error::Spi)?;
+            self.spi.lock(|bus| bus.borrow_mut().write(chunk)).map_err(VS1053Error::Spi)?;
+            self.spi.lock(|bus| bus.borrow_mut().flush()).map_err(VS1053Error::Spi)?;
         }
 
         self.data_mode_off()?;
